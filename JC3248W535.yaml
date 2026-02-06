@@ -1,0 +1,196 @@
+# -------------------------------------------------------------------
+# ELEMENT DE BASE
+# -------------------------------------------------------------------
+esphome:
+  platformio_options:
+    upload_speed: 921600
+    board_build.flash_mode: dio
+    board_build.f_flash: 80000000L
+    board_build.f_cpu: 240000000L
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      COMPILER_OPTIMIZATION_SIZE: y
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: y
+      CONFIG_ESP32S3_DATA_CACHE_64KB: y
+      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: y
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: y
+      CONFIG_SPIRAM_RODATA: y
+
+# -------------------------------------------------------------------
+# PSRAM
+# -------------------------------------------------------------------
+psram:
+  mode: octal
+  speed: 80MHz # 120MHz is not supported and falls back to 40MHz
+
+# -------------------------------------------------------------------
+# SPI
+# -------------------------------------------------------------------
+spi:
+  - type: quad
+    clk_pin: 47
+    data_pins: [21, 48, 40, 39]
+
+# -------------------------------------------------------------------
+# I2C
+# -------------------------------------------------------------------
+i2c:
+  - sda: 4
+    scl: 8
+
+# -------------------------------------------------------------------
+# OUTPUT
+# -------------------------------------------------------------------
+output:
+  - id: gpio_backlight_pwm
+    platform: ledc
+    pin: 1
+
+# -------------------------------------------------------------------
+# DEFINITION DES TIME
+# -------------------------------------------------------------------
+time:
+  # ha_time ==> Heure affichée dans le bandeau haut
+  - platform: homeassistant
+    id: ha_time
+    on_time_sync:
+      - then:
+          - lvgl.label.update:
+              id:
+                - id: nav_clock
+                - id: screen_saver_heure
+              text:
+                time_format: '%H:%M'
+                time: ha_time
+#          - lvgl.label.update:
+#              id:
+#                - id: screen_saver_heure
+#              text:
+#                time_format: '%H:%M'
+#                time: ha_time
+    on_time:
+      - hours: 2,3,4,5
+        minutes: 5
+        seconds: 0
+        then:
+          - switch.turn_on: switch_antiburn
+      - hours: 2,3,4,5
+        minutes: 35
+        seconds: 0
+        then:
+          - switch.turn_off: switch_antiburn
+      - minutes: 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59
+        seconds:
+          - 0
+        then:
+          - lvgl.label.update:
+              id:
+                - id: nav_clock
+                - id: screen_saver_heure
+              text:
+                time_format: '%H:%M'
+                time: ha_time
+    timezone: Europe/Paris #CET-1CEST,M3.5.0,M10.5.0/3
+    update_interval: 15min
+  # ha_time ==> Heure d'activation de l'anti-burn
+#  - platform: homeassistant
+#    on_time:
+#      - hours: 2,3,4,5
+#        minutes: 5
+#        seconds: 0
+#        then:
+#          - switch.turn_on: switch_antiburn
+
+
+# -------------------------------------------------------------------
+# DEFINITION LIGHTS SYSTEME (ALLUMAGE ECRAN)
+# -------------------------------------------------------------------
+light:
+  - id: display_backlight
+    name: Display Backlight
+    platform: monochromatic
+    output: gpio_backlight_pwm
+    restore_mode: ALWAYS_ON
+
+# -------------------------------------------------------------------
+# DEFINITION NUMBER SYSTEME (DUREE ECRAN DE VEILLE)
+# -------------------------------------------------------------------
+number:
+  - platform: template
+    name: LVGL Screen timeout
+    optimistic: true
+    id: display_timeout
+    unit_of_measurement: "s"
+    initial_value: 45
+    restore_value: true
+    min_value: 10
+    max_value: 180
+    step: 5
+    mode: box
+
+# -------------------------------------------------------------------
+# DEFINITION DES SWITCH SYSTEME (ANTIBURN / ECRAN DE VEILLE)
+# -------------------------------------------------------------------
+switch:
+  - platform: template
+    name: Antiburn
+    id: switch_antiburn
+    icon: mdi:television-shimmer
+    optimistic: true
+    entity_category: "config"
+    turn_on_action:
+      - logger.log: "Starting Antiburn"
+      - if:
+          condition: lvgl.is_paused
+          then:
+            - lvgl.resume:
+            - lvgl.widget.redraw:
+      - lvgl.pause:
+          show_snow: true
+    turn_off_action:
+      - logger.log: "Stopping Antiburn"
+      - if:
+          condition: lvgl.is_paused
+          then:
+            - lvgl.resume:
+            - lvgl.widget.redraw:
+  - platform: template
+    name: Screen Saver
+    id: screen_saver
+    optimistic: true
+    entity_category: "config"
+    assumed_state: true
+    icon: mdi:cellphone-screenshot
+    restore_mode: ALWAYS_ON
+
+# -------------------------------------------------------------------
+# DISPLAY
+# -------------------------------------------------------------------
+display:
+  - id: main_display
+    platform: mipi_spi
+    model: JC3248W535
+    data_rate: 40MHz
+    update_interval: never
+    auto_clear_enabled: false
+
+# -------------------------------------------------------------------
+# TOUCHSCREEN
+# -------------------------------------------------------------------
+touchscreen:
+  - id: main_touchscreen
+    platform: axs15231
+    on_release:
+      - if:
+          condition: lvgl.is_paused
+          then:
+            - logger.log: "LVGL resuming"
+            - lvgl.resume:
+            - lvgl.widget.redraw:
+            - light.turn_on: display_backlight
